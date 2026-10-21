@@ -12,6 +12,10 @@ from typing import Dict, List, Type, TypeVar
 # Use the model map bundled with LiteLLM, rather than downloading the latest one on import
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
+# Turn off LiteLLM's log redaction. Its filter is attached to the Streamlit server's asyncio and uvicorn loggers,
+# and it imports more of LiteLLM; if the server logs while a session is importing LiteLLM, the threads deadlock
+os.environ.setdefault("LITELLM_DISABLE_REDACT_SECRETS", "true")
+
 import litellm
 from pydantic import BaseModel
 
