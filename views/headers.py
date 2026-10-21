@@ -28,19 +28,19 @@ def display_overview(arena: Arena, do_turn: Callable, do_auto_turn: Callable) ->
             f"Run Turn {arena.turn}",
             disabled=arena.is_game_over,
             on_click=do_turn,
-            use_container_width=True,
+            width="stretch",
         )
     with button_columns[2]:
         st.button(
             "Run Game",
             disabled=arena.is_game_over,
             on_click=do_auto_turn,
-            use_container_width=True,
+            width="stretch",
         )
     with button_columns[4]:
         if st.button(
             "Restart Game",
-            use_container_width=True,
+            width="stretch",
         ):
             del st.session_state.arena
             st.rerun()

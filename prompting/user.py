@@ -20,14 +20,14 @@ You must respond strictly in JSON, and it must follow this format:
 """
     response += (
         """{
-    "secret strategy": "Here you should secretly explain your plans, for your own benefit - the other players will not see this",
-    "give coin to": "Here you should put the player you will give a coin to; must be one of """
+    "secret_strategy": "Here you should secretly explain your plans, for your own benefit - the other players will not see this",
+    "give_coin_to": "Here you should put the player you will give a coin to; must be one of """
         + others
         + """",
-    "take coin from": "Here you should put the player you will take a coin from; must be one of """
+    "take_coin_from": "Here you should put the player you will take a coin from; must be one of """
         + others
         + """",
-    "private messages":
+    "private_messages":
     {
 """
     )
@@ -84,14 +84,14 @@ You must respond strictly in JSON, and it must follow this format:
 """
     response += (
         """{
-    "secret strategy": "Here you should secretly explain your plans, for your own benefit - the other players will not see this",
-    "give coin to": "Here you should put the player you will give a coin to; must be one of """
+    "secret_strategy": "Here you should secretly explain your plans, for your own benefit - the other players will not see this",
+    "give_coin_to": "Here you should put the player you will give a coin to; must be one of """
         + others
         + """",
-    "take coin from": "Here you should put the player you will take a coin from; must be one of """
+    "take_coin_from": "Here you should put the player you will take a coin from; must be one of """
         + others
         + """",
-    "private messages":
+    "private_messages":
     {
 """
     )

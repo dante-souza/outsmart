@@ -5,7 +5,7 @@ colorFrom: yellow
 colorTo: red
 python_version: 3.11
 sdk: streamlit
-sdk_version: 1.36.0
+sdk_version: 1.66.1
 app_file: app.py
 pinned: false
 license: mit
@@ -44,23 +44,21 @@ in a game of strategy and negotiation.
 
 ## Installing locally
 
-Using Anaconda is highly recommended, to provide you with a consistent environment including the right python version.
+All models are called through [OpenRouter](https://openrouter.ai), so you only need one API key.
 
-1. If you don't have it already, install [Anaconda](https://docs.anaconda.com/anaconda/install/)
-2. Create and activate your environment with:  
-`conda create -n outsmart python=3.11`  
-`conda activate outsmart`
-3. git clone the repo and install dependencies from the root directory:  
-`pip install -r requirements.txt`
-4. Create a .env file in the root directory and populate it with the following keys:  
+1. If you don't have it already, install [uv](https://docs.astral.sh/uv/)
+2. git clone the repo and install dependencies from the root directory:  
+`uv sync`
+3. Create a .env file in the root directory and populate it with the following keys:  
 ```
-GOOGLE_API_KEY=xxxx  
-ANTHROPIC_API_KEY=xxxx  
-OPENAI_API_KEY=xxxx  
+OPENROUTER_API_KEY=xxxx  
 ARENA=random
 ```
-5. From the root directory, start streamlit to run the app!  
-`python -m streamlit run app.py`
+4. From the root directory, start streamlit to run the app!  
+`uv run streamlit run app.py`
+
+Run the tests with `uv run pytest`. Hugging Face installs from requirements.txt, so after changing dependencies, regenerate it with:  
+`uv export --format requirements-txt --no-hashes --no-dev -o requirements.txt`
 
 If you have problems, please do get in touch - I'd love to help!  
 I'm at ed [at] edwarddonner [dot] com.

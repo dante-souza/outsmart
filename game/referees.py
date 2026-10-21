@@ -1,5 +1,4 @@
 from typing import List, Dict, Callable
-import json
 import logging
 from game.players import Player
 from models.moves import Move
@@ -39,16 +38,14 @@ class Referee:
         :param player: the player being processed
         :return: a TurnRecord that wraps the output from the model, including whether it was valid
         """
-        response = ""
         try:
-            response = player.make_move(self.turn)
-            move = self.parse_response(response)
+            move = player.make_move(self.turn)
+            self.check_response(move, player.name)
             logger.info(f"Turn {self.turn} received OK from {player}")
             return TurnRecord(player.name, self.turn, move=move)
         except Exception as e:
             logger.error(f"Exception while processing response from {player}")
             logger.error(e)
-            logger.error(f"Response received was:\n{response}")
             return TurnRecord(player.name, self.turn, is_invalid_move=True)
 
     def player_with_name(self, name: str) -> Player:
@@ -171,30 +168,23 @@ class Referee:
             if not record.is_invalid_move:
                 messages = record.move.messages
                 for recipient, message in messages.items():
-                    self.records[recipient].messages[player.name] = message
+                    if recipient in self.records and recipient != name:
+                        self.records[recipient].messages[name] = message
+                    else:
+                        logger.warning(
+                            f"Dropped message from {name} to {recipient}, who isn't another player"
+                        )
 
-    def check_response(self, move: Move) -> None:
+    def check_response(self, move: Move, name: str) -> None:
         """
-        Make sure the give and take fields are valid, otherwise fail
+        Make sure the give and take fields name other players, otherwise fail
         :param move: The move object representing the response from the player
+        :param name: The name of the player who made the move
         """
-        if move.give not in self.player_names:
+        others = [other for other in self.player_names if other != name]
+        if move.give not in others:
             raise ValueError("Invalid give field in the response JSON")
-        if move.take not in self.player_names:
+        if move.take not in others:
             raise ValueError("Invalid take field in the response JSON")
         if move.give == move.take:
             raise ValueError("Illegal response JSON: matching give and take")
-
-    def parse_response(self, response: str) -> Move:
-        """
-        Convert a text response into a Move object
-        :param response: the text returned from an LLM
-        :return: a Move object
-        """
-        first = response.find("{")
-        last = response.rfind("}")
-        response = response[first : last + 1]
-        response_dict = json.loads(response)
-        move = Move(**response_dict)
-        self.check_response(move)
-        return move

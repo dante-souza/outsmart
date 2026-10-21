@@ -2,13 +2,14 @@ from typing import List, Dict, Any, Self
 from interfaces.llms import LLM
 from prompting.system import instructions
 from prompting.user import prompt
+from models.moves import Move
 from models.records import TurnRecord
 
 
 class Player:
     """
     A particular Player in the game of Outsmart
-    The player has a name, and an underlying llm (an instance of a subclass of interface.llms.LLM)
+    The player has a name, and an underlying llm (an instance of interfaces.llms.LLM)
     All LLM interactions are delegated to the LLM object.
     """
 
@@ -22,17 +23,14 @@ class Player:
     is_winner: bool
     series: List[int]
 
-    MAX_TOKENS = 600
-
-    def __init__(self, name: str, model_name: str, temperature: float):
+    def __init__(self, name: str, model_name: str):
         """
         Create a new instance of Player
         :param name: The Player's name, as the others will address them
         :param model_name: Which LLM model to use
-        :param temperature: The temperature setting for the model, so that different temp models can compete
         """
         self.name = name
-        self.llm = LLM.for_model_name(model_name, temperature)
+        self.llm = LLM(model_name)
         self.history = {}
         self.coins = 12
         self.prior_coins = 12
@@ -65,15 +63,18 @@ class Player:
             self.name, other_names, other_coins, self.coins, turn, self.records
         )
 
-    def make_move(self, turn: int) -> str:
+    def make_move(self, turn: int) -> Move:
         """
         Carry out a turn by interfacing with my LLM
         :param turn: which turn number we are on
-        :return: the response from the LLM
+        :return: the move chosen by the LLM
         """
         system_prompt = self.system_prompt()
         user_prompt = self.user_prompt(turn)
-        return self.llm.send(system_prompt, user_prompt, self.MAX_TOKENS)
+        other_names = [other.name for other in self.others]
+        response_format = Move.response_format(other_names)
+        response = self.llm.send(system_prompt, user_prompt, response_format)
+        return Move.from_response(response)
 
     def report(self) -> str:
         """
@@ -81,8 +82,7 @@ class Player:
         :return:
         """
         result = f"Player name: {self.name}<br/>"
-        result += f"Model: {self.llm.model_name}<br/>"
-        result += f"Temperature: {self.llm.temperature}<br/><br/>"
+        result += f"Model: {self.llm.model_name}<br/><br/>"
         for turn_record in self.records:
             result += str(turn_record).replace("\n", "<br/>")
             result += "<br/>"

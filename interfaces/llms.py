@@ -1,267 +1,116 @@
 """
-This module contains the interfaces to external LLMs;
-There's an abstract base class LLM that can be subclassed to provide an interface to a model.
-The class method LLM.for_model_name creates an instance of a subclass to interact with the API
+This module contains the interface to external LLMs. Every model is reached through OpenRouter using LiteLLM,
+and responses use structured outputs so that they always conform to a pydantic schema.
+Create an LLM with one of the names from LLM.all_model_names(), then communicate with send().
 This module should have no knowledge of the game itself.
 """
 
+import logging
 import os
-from abc import ABC
-from typing import Any, Dict, Self, List, Type
-from openai import OpenAI
-import anthropic
-from groq import Groq
+from typing import Dict, List, Type, TypeVar
+
+# Use the model map bundled with LiteLLM, rather than downloading the latest one on import
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+import litellm
+from pydantic import BaseModel
+
+litellm.suppress_debug_info = True
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+Response = TypeVar("Response", bound=BaseModel)
+
+# The model names used in the game and stored with past results, mapped to their ids on OpenRouter.
+# Each of these supports structured outputs on OpenRouter
+OPENROUTER_MODELS: Dict[str, str] = {
+    "openai/gpt-6-luna": "openai/gpt-6-luna",
+    "anthropic/claude-haiku-5.5": "anthropic/claude-haiku-5.5",
+    "deepseek/deepseek-v4.1-flash-1017": "deepseek/deepseek-v4.1-flash-1017",
+    "xiaomi/mimo-v2.6-flash": "xiaomi/mimo-v2.6-flash",
+    "gpt-5.4": "openai/gpt-5.4",
+    "gpt-5.2": "openai/gpt-5.2",
+    "gpt-5.1": "openai/gpt-5.1",
+    "gpt-5": "openai/gpt-5",
+    "gpt-5-nano": "openai/gpt-5-nano",
+    "gpt-5-mini": "openai/gpt-5-mini",
+    "claude-opus-4-6": "anthropic/claude-opus-4.6",
+    "claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
+    "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+    "claude-opus-4-5": "anthropic/claude-opus-4.5",
+    "grok-4.20-0309-reasoning": "x-ai/grok-4.20",
+    "gemini-2.5-flash": "google/gemini-2.5-flash",
+    "gemini-2.5-pro": "google/gemini-2.5-pro",
+    "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+}
+
+# Only route requests to providers that support every parameter we send, including structured outputs
+PROVIDER_ROUTING = {"require_parameters": True}
+
+# Models reason with low effort, set with OpenRouter's own reasoning parameter, which all the models support;
+# some providers don't support the top level reasoning_effort that LiteLLM would send instead
+DEFAULT_REASONING_EFFORT = "low"
+
+# These models reason far longer than the others at low effort, which slows down every turn, so reasoning is off.
+# DeepSeek still reasoned for thousands of tokens at minimal, and MiMo can only switch reasoning on or off
+REASONING_EFFORT: Dict[str, str] = {
+    "deepseek/deepseek-v4.1-flash-1017": "none",
+    "xiaomi/mimo-v2.6-flash": "none",
+}
 
 
-ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/"
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-GROK_BASE_URL = "https://api.x.ai/v1"
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OLLAMA_BASE_URL = "http://localhost:11434/v1"
-
-
-class LLM(ABC):
+class LLM:
     """
-    An abstract base class for LLMs
-    Use LLM.for_model_name() to instantiate the appropriate subclass, then communicate with send()
+    A model that is called through OpenRouter
     """
 
-    model_names = []
     model_name: str
-    temperature: float
-    client: Any
 
-    def __init__(self, model_name, temperature=1.0):
+    def __init__(self, model_name: str):
+        """
+        :param model_name: one of the names from LLM.all_model_names()
+        """
+        if model_name not in OPENROUTER_MODELS:
+            raise ValueError(f"Unsupported model: {model_name}")
         self.model_name = model_name
-        self.temperature = temperature
-        self.setup_client()
-
-    def setup_client(self):
-        """
-        Implemented by subclasses
-        """
-        pass
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implemented by subclasses
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        pass
 
     def __repr__(self) -> str:
         """
         :return: A string version of the receiver
         """
-        return f"<LLM {self.model_name} with temnp={self.temperature}>"
+        return f"<LLM {self.model_name}>"
 
-    @classmethod
-    def model_map(cls) -> Dict[str, Type[Self]]:
+    def reasoning(self) -> Dict[str, str]:
         """
-        Generate a mapping of Model Names to LLM classes, by looking at all subclasses of this one
-        :return: a mapping dictionary from model name to LLM subclass
+        :return: OpenRouter's reasoning parameter for this model
         """
-        mapping = {}
-        for llm in cls.__subclasses__():
-            for model_name in llm.model_names:
-                mapping[model_name] = llm
-        return mapping
+        effort = REASONING_EFFORT.get(self.model_name, DEFAULT_REASONING_EFFORT)
+        return {"effort": effort}
 
-    @classmethod
-    def for_model_name(cls, model_name: str, temperature=0.7) -> Self:
+    def send(
+        self, system_prompt: str, user_prompt: str, response_format: Type[Response]
+    ) -> Response:
         """
-        Given a particular model name, instantiate one of the subclasses of the receiver and initialize it
-        :param model_name: The name of the model to be communicated with
-        :param temperature: The temperature to be used in this model
-        :return: an initialized instance of an LLM subclass
+        Send the prompts to the model, which must respond with JSON that conforms to the schema
+        :param system_prompt: The system prompt passed to the LLM
+        :param user_prompt: The user prompt passed to the LLM
+        :param response_format: The pydantic class that the response must conform to
+        :return: an instance of response_format, populated from the LLM's response
         """
-        mapping = cls.model_map()
-        llm_class = mapping[model_name]
-        llm = llm_class(model_name, temperature)
-        return llm
+        response = litellm.completion(
+            model=f"openrouter/{OPENROUTER_MODELS[self.model_name]}",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format=response_format,
+            extra_body={"provider": PROVIDER_ROUTING, "reasoning": self.reasoning()},
+        )
+        return response_format.model_validate_json(response.choices[0].message.content)
 
-    @classmethod
-    def all_model_names(cls) -> List[str]:
+    @staticmethod
+    def all_model_names() -> List[str]:
         """
         :return: a list of names of all the models supported
         """
-        return list(cls.model_map().keys())
-
-
-class GPT(LLM):
-    model_names = [
-        "gpt-5",
-        "gpt-5-nano",
-        "gpt-5-mini",
-    ]
-
-    def setup_client(self):
-        self.client = OpenAI()
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implementation for OpenAI / GPT
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        effort = "low" if "gpt-5" in self.model_name else None
-        completion = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            reasoning_effort=effort,
-        )
-        return completion.choices[0].message.content
-
-
-class Claude(LLM):
-    model_names = [
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
-    ]
-
-    def setup_client(self):
-        self.client = anthropic.Anthropic()
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implementation for Anthropic / Claude
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        message = self.client.messages.create(
-            model=self.model_name,
-            max_tokens=max_tokens,
-            temperature=0.5,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return message.content[0].text
-
-
-# class Gemini(LLM):
-#     model_names = ["gemini-1.0-pro", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]
-
-#     def setup_client(self):
-#         google.generativeai.configure()
-#         self.client = google.generativeai.GenerativeModel(self.model_name)
-
-#     def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-#         """
-#         Implementation for Google / Gemini
-#         :param system_prompt: The system prompt passed to the LLM
-#         :param user_prompt: The user prompt passed to the LLM
-#         :param max_tokens: Maximum number of tokens
-#         :return: the response from the LLM
-#         """
-#         words = int(max_tokens * 0.75)
-#         message = "First, here is a System Message to set context and instructions:\n\n"
-#         message += system_prompt + "\n\n"
-#         message += f"Now here is the User's Request - please respond in under {words} words:\n\n"
-#         message += user_prompt + "\n"
-#         response = self.client.generate_content(message)
-#         first_candidate = response.candidates[0]
-
-#         if first_candidate.content.parts:
-#             myanswer1 = response.candidates[0].content.parts[0].text
-#             return myanswer1
-#         raise ValueError("Could not parse response from Gemini")
-
-
-class Grok(LLM):
-    model_names = ["grok-4", "grok-4-fast"]
-
-    def setup_client(self):
-        self.client = OpenAI(api_key=os.getenv("GROK_API_KEY"), base_url=GROK_BASE_URL)
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implementation for OpenAI / GPT
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        completion = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return completion.choices[0].message.content
-
-
-class Gemini(LLM):
-    model_names = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-    ]
-
-    def setup_client(self):
-        self.client = OpenAI(api_key=os.getenv("GOOGLE_API_KEY"), base_url=GEMINI_BASE_URL)
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implementation for OpenAI / GPT
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        completion = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.5,
-            response_format={"type": "json_object"},
-        )
-        return completion.choices[0].message.content
-
-
-class GroqAPI(LLM):
-    """
-    A class to act as an interface to the remote AI, in this case Groq
-    """
-
-    model_names = [
-        "openai/gpt-oss-120b",
-    ]
-
-    def setup_client(self):
-        self.client = Groq()
-
-    def send(self, system_prompt: str, user_prompt: str, max_tokens: int) -> str:
-        """
-        Implementation for Groq
-        :param system_prompt: The system prompt passed to the LLM
-        :param user_prompt: The user prompt passed to the LLM
-        :param max_tokens: Maximum number of tokens
-        :return: the response from the LLM
-        """
-        completion = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.5,
-            response_format={"type": "json_object"},
-        )
-        return completion.choices[0].message.content
+        return list(OPENROUTER_MODELS.keys())

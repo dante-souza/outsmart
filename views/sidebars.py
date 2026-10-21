@@ -7,7 +7,7 @@ from models.games import Game
 def display_ranks():
     st.markdown(
         "<span style='font-size:13px;'>The table is sorted initially by Win %. "
-        "This only shows recent versions of models. "
+        f"This only shows recent versions of models, once they've played {Arena.MINIMUM_GAMES} games. "
         "The skill ratings use the TrueSkill methodology,"
         " an ELO-style system for multi-player games.</span>",
         unsafe_allow_html=True,

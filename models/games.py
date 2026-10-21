@@ -37,24 +37,6 @@ class Result(BaseModel):
         """
         return json.dumps(self.model_dump())
 
-    def update_on(self, df: pd.DataFrame) -> None:
-        """
-        Add this result to the DataFrame for the leaderboard
-        This is perhaps more complex than needed because the dataframe only has Win %, not a count of Wins
-        :param df: the dataframe for the leaderboard
-        """
-        llm = self.llm
-        if not (df["LLM"] == llm).any():
-            df.loc[len(df)] = [llm, 0, 0.0, 0.0]
-        games = df.loc[df["LLM"] == llm, "Games"].values[0]
-        wins_percent = df.loc[df["LLM"] == llm, "Win %"].values[0]
-        wins = games * wins_percent / 100
-        df.loc[df["LLM"] == llm, "Games"] += 1
-        if self.rank == 0:
-            df.loc[df["LLM"] == llm, "Win %"] = (wins + 1) * 100 / (games + 1)
-        else:
-            df.loc[df["LLM"] == llm, "Win %"] = wins * 100 / (games + 1)
-
 
 class Game(BaseModel):
     """
@@ -77,7 +59,6 @@ class Game(BaseModel):
         return pymongo.MongoClient(mongo_uri)
 
     @classmethod
-    @st.cache_data(ttl=1)
     def all(cls) -> List[Self]:
         client = cls.get_connection()
         games = client.outsmart.games
@@ -131,20 +112,39 @@ class Game(BaseModel):
     def games_df(cls) -> pd.DataFrame:
         """
         Create a dataframe that represents the leaderboard for games played
-        Use the TrueSkill methodology to assess Skill level
-        The expose method calculates 1 number (mean - 3 * standard deviation) for the leaderboard
+        Calculating it takes a few seconds, so it's cached and only recalculated when the number of games changes
         :return: a DataFrame with the leaderboard including Win % and Skill
         """
-        columns = ["LLM", "Games", "Win %", "Skill"]
-        df = pd.DataFrame(columns=columns)
+        return cls.leaderboard(cls.count())
+
+    @classmethod
+    @st.cache_data(max_entries=1)
+    def leaderboard(cls, count: int) -> pd.DataFrame:
+        """
+        Calculate the leaderboard from every game in the DB
+        Use the TrueSkill methodology to assess Skill level
+        The expose method calculates 1 number (mean - 3 * standard deviation) for the leaderboard
+        :param count: the number of games in the DB; it's only used as the cache key
+        :return: a DataFrame with the leaderboard including Win % and Skill
+        """
         games = cls.all()
-        for game in games:
-            for result in game.results:
-                result.update_on(df)
+        results = pd.DataFrame(
+            [
+                (result.llm, result.rank == 0)
+                for game in games
+                for result in game.results
+            ],
+            columns=["LLM", "Won"],
+        )
+        df = (
+            results.groupby("LLM", sort=False)
+            .agg(Games=("Won", "size"), Wins=("Won", "sum"))
+            .reset_index()
+        )
+        df["Win %"] = df["Wins"] * 100 / df["Games"]
         ratings = cls.ratings_for(games, df)
-        for llm, rating in ratings.items():
-            df.loc[df["LLM"] == llm, "Skill"] = trueskill.expose(rating)
-        return df
+        df["Skill"] = [trueskill.expose(ratings[llm]) for llm in df["LLM"]]
+        return df[["LLM", "Games", "Win %", "Skill"]]
 
     @classmethod
     def latest_df(cls) -> pd.DataFrame:

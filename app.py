@@ -5,7 +5,7 @@ Check if an Arena is in the session, and if not, create a new one using Arena.de
 Delegate to a Display object to manage the drawing of the UI components
 
 To see it in action, run:
-python -m streamlit run app.py
+uv run streamlit run app.py
 """
 
 from dotenv import load_dotenv

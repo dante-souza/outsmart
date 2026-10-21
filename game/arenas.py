@@ -24,7 +24,9 @@ class Arena:
     is_game_over: bool
 
     NAMES = ["Alex", "Blake", "Charlie", "Drew", "Eden", "Fallon", "Gale", "Harper"]
-    TEMPERATURE = 0.7
+
+    # Models need to have played at least this many games to appear in the rankings
+    MINIMUM_GAMES = 10
 
     def __init__(self, players: List[Player]):
         """
@@ -104,12 +106,14 @@ class Arena:
         """
         A turn has completed. Handle the outcome, including checking if the game has ended
         """
+        self.post_turn_solvency_check()
         for player in self.players:
             player.series.append(player.coins)
-        self.post_turn_solvency_check()
+        if self.is_game_over:
+            return
         if self.turn == 10:
             self.handle_game_over()
-        elif not self.is_game_over:
+        else:
             self.turn += 1
 
     def do_turn(self, progress: ProgressCallback) -> bool:
@@ -138,11 +142,10 @@ class Arena:
             return random.sample(LLM.all_model_names(), 4)
         else:
             return [
-                "openai/gpt-oss-120b",
-                "gpt-5-nano",
-                # "gemini-2.5-pro",
-                "grok-4-fast",
-                "claude-haiku-4-5",
+                "openai/gpt-6-luna",
+                "anthropic/claude-haiku-5.5",
+                "deepseek/deepseek-v4.1-flash-1017",
+                "xiaomi/mimo-v2.6-flash",
             ]
 
     @classmethod
@@ -154,7 +157,7 @@ class Arena:
         names = cls.NAMES
         model_names = cls.model_names()
         players = [
-            Player(name, model_name, cls.TEMPERATURE)
+            Player(name, model_name)
             for name, model_name in zip(names, model_names)
         ]
         return cls(players)
@@ -180,12 +183,15 @@ class Arena:
     def rankings() -> pd.DataFrame:
         """
         Create the leaderboard, delegating to the Game business object to handle this
+        Only show models that are still supported and have played at least MINIMUM_GAMES games;
+        the skill ratings still take every game into account
         :return: a dataframe with the leaderboard info
         """
         df = Game.games_df()
         df = df.sort_values(by="Win %", ascending=False)
         supported_models = LLM.all_model_names()
         df = df[df["LLM"].isin(supported_models)]
+        df = df[df["Games"] >= Arena.MINIMUM_GAMES]
         return df
 
     @staticmethod
